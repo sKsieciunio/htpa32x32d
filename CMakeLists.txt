@@ -35,7 +35,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(htpa32x32d_cpp main.cpp htpa32x32d.cpp)
+add_executable(htpa32x32d_cpp main.cpp)
 
 pico_set_program_name(htpa32x32d_cpp "htpa32x32d_cpp")
 pico_set_program_version(htpa32x32d_cpp "0.1")

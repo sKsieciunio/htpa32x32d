@@ -1,11 +1,12 @@
+#ifndef HTPA32X32D_H
+#define HTPA32X32D_H
+
+#include "hardware/i2c.h"
+#include "pico/stdlib.h"
+
 class Htpa32x32d
 {
 private:
-	i2c_inst_t *i2c = i2c0;
-	uint8_t addr_sensor = 0x1A;
-	uint8_t addr_eeprom = 0x50;
-	bool woken_up = false;
-
 	enum Register
 	{
 		Configuration = 0x01,
@@ -18,24 +19,26 @@ private:
 		Trim6 = 0x08,
 		Trim7 = 0x09,
 		ReadTop = 0x0A,
-		ReadBottom = 0x0B,
+		ReadBottom = 0x0B
 	};
-
-	enum SensorHalf
-	{
-		Top = 0x0A,
-		Bottom = 0x0B,
-	};
-
-	void send_cmd(uint8_t cmd, uint8_t data);
 
 public:
-	Htpa32x32d() {}
-	Htpa32x32d(i2c_inst_t *i2c, uint8_t addr_sensor, uint8_t addr_eeprom)
-		: i2c{i2c}, addr_sensor{addr_sensor}, addr_eeprom{addr_eeprom} {}
+	Htpa32x32d();
+	Htpa32x32d(i2c_inst_t *i2c, uint8_t addr_sensor, uint8_t addr_eeprom);
 
-	uint8_t get_status();
-	bool is_woken_up();
-	void wake_up_and_write_config();
-	void get_measurement_data(SensorHalf half, uint8_t data[258]);
+	bool is_woken_up() const;
+	int sleep();
+	int wakeup_and_write_config();
+	int get_sensor_status(uint8_t &status);
+	// void start_measurement(uint8_t measurement);
+	// void check_measurement_ready(uint8_t measurement, bool &ready);
+	// void get_measurement_data(SensorHalf half, uint8_t *data, size_t size);
+
+private:
+	i2c_inst_t *i2c;
+	uint8_t addr_sensor;
+	uint8_t addr_eeprom;
+	bool woken_up;
 };
+
+#endif

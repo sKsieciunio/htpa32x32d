@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
-#include "dsfasdf"
 
 #define I2C_PORT i2c0
 #define I2C_SDA 4
@@ -94,14 +93,13 @@ int main()
         uint8_t data[2048] = {0};
         read_all(data, 2048);
 
-        printf("\n\n");
         for (size_t i = 0; i < 2048; i++)
         {
-            if (i % 64 == 0)
+            if (i % 64 == 0 && i != 0)
                 printf("\n");
             printf("%02X", data[i]);
         }
-        printf("\n\n");
+        printf("\n");
     }
 
     // Sleep sensor

@@ -10,34 +10,6 @@
 #define I2C_SDA 4
 #define I2C_SCL 5
 
-enum HtpaRegister
-{
-    Configuration = 0x01,
-    Status = 0x02,
-    Trim1 = 0x03,
-    Trim2 = 0x04,
-    Trim3 = 0x05,
-    Trim4 = 0x06,
-    Trim5 = 0x07,
-    Trim6 = 0x08,
-    Trim7 = 0x09,
-    ReadTop = 0x0A,
-    ReadBottom = 0x0B
-};
-
-enum Block
-{
-    Block0 = 0b00,
-    Block1 = 0b01,
-    Block2 = 0b10,
-    Block3 = 0b11,
-};
-
-uint8_t get_sensor_status();
-void print_sensor_status();
-void read_block(Block block, uint8_t *top_data, size_t top_len, uint8_t *bottom_data, size_t bottom_len);
-void read_all(uint8_t *data, size_t len);
-
 // STRUCT WITH ALL SENSOR CHARACTERISTICS
 struct characteristics
 {
@@ -82,22 +54,87 @@ uint8_t gradscale, vddscgrad, vddscoff, epsilon;
 
 int8_t globaloff;
 
-uint8_t globalgain;
+uint8_t tablenumber, vddth1, vddth2, ptatth1, ptatth2, globalgain;
 
-float pixcmin, pixcmax;
+signed short thgrad[PIXEL_PER_COLUMN][PIXEL_PER_ROW];
+signed short thoffset[PIXEL_PER_COLUMN][PIXEL_PER_ROW];
+signed short vddcompgrad[ROW_PER_BLOCK * 2][PIXEL_PER_ROW]; // TODO:
+signed short vddcompoff[ROW_PER_BLOCK * 2][PIXEL_PER_ROW];  // TODO:
+
+float ptatgr_float, ptatoff_float, pixcmin, pixcmax;
 // use a heap allocated memory to store the pixc instead of a nxm array
 // ^thats not true anymore
-unsigned long pixc2_0[NUMBER_OF_PIXEL * 4]; // start address of the allocated heap memory
-unsigned long *pixc2;                       // increasing address pointer
+unsigned long pixc2_0[NUMBER_OF_PIXEL]; // start address of the allocated heap memory
+unsigned long *pixc2;                   // increasing address pointer
+
+// SENSOR DATA
+uint16_t data_pixel[PIXEL_PER_COLUMN][PIXEL_PER_ROW];
+uint8_t RAMoutput[2 * NUMBER_OF_BLOCKS + 2][BLOCK_LENGTH];
+/*
+  RAMoutput is the place where the raw values are saved
+
+  example, order for 80x64:
+  RAMoutput[0][]... data from block 0 top
+  RAMoutput[1][]... data from block 1 top
+  RAMoutput[2][]... data from block 2 top
+  RAMoutput[3][]... data from block 3 top
+  RAMutput[4][]... electrical offset top
+  RAMoutput[5][]... electrical offset bottom
+  RAMoutput[6][]... data from block 3 bottom
+  RAMoutput[7][]... data from block 2 bottom
+  RAMoutput[8][]... data from block 1 bottom
+  RAMoutput[9][]... data from block 0 bottom
+
+*/
+uint16_t eloffset[ROW_PER_BLOCK * 2][PIXEL_PER_ROW];
+uint8_t statusreg;
+uint16_t Ta, ptat_av_uint16, vdd_av_uint16;
+
+// BUFFER for PTAT, VDD, and elOffsets
+// PTAT:
+uint16_t ptat_buffer[PTAT_BUFFER_SIZE];
+uint8_t use_ptat_buffer = 0;
+uint8_t ptat_i = 0;
+// VDD:
+uint16_t vdd_buffer[VDD_BUFFER_SIZE];
+uint8_t use_vdd_buffer = 0;
+uint8_t vdd_i = 0;
+// electrical offsets:
+uint8_t use_eloffsets_buffer = 0;
+uint8_t new_offsets = 1;
 
 // PROGRAM CONTROL
+bool switch_ptat_vdd = 0;
+uint16_t picnum = 0;
+uint8_t state = 0;
+uint8_t read_block_num = START_WITH_BLOCK;
+uint8_t read_eloffset_next_pic = 0;
 bool ReadingRoutineEnable = 1;
 
 // OTHER
 uint32_t gradscale_div, vddscgrad_div, vddscoff_div;
+int vddcompgrad_n;
+int vddcompoff_n;
+uint8_t print_state = 0;
 
 unsigned NewDataAvailable = 1;
 unsigned short timert;
+repeating_timer_t timer;
+
+uint8_t get_sensor_status()
+{
+    uint8_t cmd = STATUS_REGISTER;
+    uint8_t status;
+    i2c_write_blocking(I2C_PORT, SENSOR_ADDRESS, &cmd, 1, true);
+    i2c_read_blocking(I2C_PORT, SENSOR_ADDRESS, &status, 1, false);
+
+    return status;
+}
+
+void print_sensor_status()
+{
+    printf("Sensor status: 0x%02X\n", get_sensor_status());
+}
 
 uint8_t read_EEPROM_byte(uint16_t address)
 {
@@ -128,12 +165,26 @@ void read_eeprom()
     clk_user = read_EEPROM_byte(E_CLK_USER);
     bpa_user = read_EEPROM_byte(E_BPA_USER);
     pu_user = read_EEPROM_byte(E_PU_USER);
-
+    vddth1 = read_EEPROM_byte(E_VDDTH1_2) << 8 | read_EEPROM_byte(E_VDDTH1_1);
+    vddth2 = read_EEPROM_byte(E_VDDTH2_2) << 8 | read_EEPROM_byte(E_VDDTH2_1);
     vddscgrad = read_EEPROM_byte(E_VDDSCGRAD);
     vddscoff = read_EEPROM_byte(E_VDDSCOFF);
+    ptatth1 = read_EEPROM_byte(E_PTATTH1_2) << 8 | read_EEPROM_byte(E_PTATTH1_1);
+    ptatth2 = read_EEPROM_byte(E_PTATTH2_2) << 8 | read_EEPROM_byte(E_PTATTH2_1);
 
     gradscale = read_EEPROM_byte(E_GRADSCALE);
+    tablenumber = read_EEPROM_byte(E_TABLENUMBER2) << 8 | read_EEPROM_byte(E_TABLENUMBER1);
 
+    b[0] = read_EEPROM_byte(E_PTATGR_1);
+    b[1] = read_EEPROM_byte(E_PTATGR_2);
+    b[2] = read_EEPROM_byte(E_PTATGR_3);
+    b[3] = read_EEPROM_byte(E_PTATGR_4);
+    ptatgr_float = *(float *)b;
+    b[0] = read_EEPROM_byte(E_PTATOFF_1);
+    b[1] = read_EEPROM_byte(E_PTATOFF_2);
+    b[2] = read_EEPROM_byte(E_PTATOFF_3);
+    b[3] = read_EEPROM_byte(E_PTATOFF_4);
+    ptatoff_float = *(float *)b;
     b[0] = read_EEPROM_byte(E_PIXCMIN_1);
     b[1] = read_EEPROM_byte(E_PIXCMIN_2);
     b[2] = read_EEPROM_byte(E_PIXCMIN_3);
@@ -155,8 +206,8 @@ void read_eeprom()
     // top half
     for (int i = 0; i < (unsigned short)(DevConst.NumberOfPixel / 2); i++)
     {
-        // thgrad[m][n] = read_EEPROM_byte(E_THGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_THGRAD + 2 * i);
-        // thoffset[m][n] = read_EEPROM_byte(E_THOFFSET + 2 * i + 1) << 8 | read_EEPROM_byte(E_THOFFSET + 2 * i);
+        thgrad[m][n] = read_EEPROM_byte(E_THGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_THGRAD + 2 * i);
+        thoffset[m][n] = read_EEPROM_byte(E_THOFFSET + 2 * i + 1) << 8 | read_EEPROM_byte(E_THOFFSET + 2 * i);
         *(pixc2 + m * DevConst.PixelPerRow + n) = read_EEPROM_byte(E_PIJ + 2 * i + 1) << 8 | read_EEPROM_byte(E_PIJ + 2 * i);
         n++;
         if (n == DevConst.PixelPerRow)
@@ -170,11 +221,42 @@ void read_eeprom()
     n = 0;
     for (int i = (unsigned short)(DevConst.NumberOfPixel / 2); i < (unsigned short)(DevConst.NumberOfPixel); i++)
     {
-        // thgrad[m][n] = read_EEPROM_byte(E_THGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_THGRAD + 2 * i);
-        // thoffset[m][n] = read_EEPROM_byte(E_THOFFSET + 2 * i + 1) << 8 | read_EEPROM_byte(E_THOFFSET + 2 * i);
+        thgrad[m][n] = read_EEPROM_byte(E_THGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_THGRAD + 2 * i);
+        thoffset[m][n] = read_EEPROM_byte(E_THOFFSET + 2 * i + 1) << 8 | read_EEPROM_byte(E_THOFFSET + 2 * i);
         *(pixc2 + m * DevConst.PixelPerRow + n) = read_EEPROM_byte(E_PIJ + 2 * i + 1) << 8 | read_EEPROM_byte(E_PIJ + 2 * i);
         n++;
 
+        if (n == DevConst.PixelPerRow)
+        {
+            n = 0;
+            m--; // !!!! backwards !!!!
+        }
+    }
+
+    //---VddCompGrad and VddCompOff---
+    // top half
+    m = 0;
+    n = 0;
+    // top half
+    for (int i = 0; i < (unsigned short)(DevConst.PixelPerBlock); i++)
+    {
+        vddcompgrad[m][n] = read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i);
+        vddcompoff[m][n] = read_EEPROM_byte(E_VDDCOMPOFF + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPOFF + 2 * i);
+        n++;
+        if (n == DevConst.PixelPerRow)
+        {
+            n = 0;
+            m++; // !!!! forwards !!!!
+        }
+    }
+    // bottom half
+    m = (unsigned char)(DevConst.RowPerBlock * 2 - 1);
+    n = 0;
+    for (int i = (unsigned short)(DevConst.PixelPerBlock); i < (unsigned short)(DevConst.PixelPerBlock * 2); i++)
+    {
+        vddcompgrad[m][n] = read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i);
+        vddcompoff[m][n] = read_EEPROM_byte(E_VDDCOMPOFF + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPOFF + 2 * i);
+        n++;
         if (n == DevConst.PixelPerRow)
         {
             n = 0;
@@ -251,11 +333,357 @@ uint16_t calc_timert(uint8_t clk, uint8_t mbit)
     return calculated_timer_duration;
 }
 
-void timer_callback()
+bool timer_callback(repeating_timer_t *rt)
 {
+    static int count = 0;
+    // printf("timer fired! count: %d\n", ++count);
     if (ReadingRoutineEnable)
     {
         NewDataAvailable = 1;
+    }
+    return true;
+}
+
+void read_sensor_register(uint8_t addr, uint8_t *dest, uint16_t n)
+{
+    i2c_write_blocking(I2C_PORT, SENSOR_ADDRESS, &addr, 1, true);
+    i2c_read_blocking(I2C_PORT, SENSOR_ADDRESS, dest, n, false);
+}
+
+void readblockinterrupt()
+{
+    unsigned char bottomblock;
+
+    ReadingRoutineEnable = 0;
+    cancel_repeating_timer(&timer);
+
+    // check EOC bit
+    read_sensor_register(STATUS_REGISTER, &statusreg, 1);
+    while (statusreg & 0x01 == 0)
+    {
+        read_sensor_register(STATUS_REGISTER, &statusreg, 1);
+    }
+
+    read_sensor_register(TOP_HALF, (uint8_t *)&RAMoutput[read_block_num], BLOCK_LENGTH);
+    bottomblock = (uint8_t)((uint8_t)(NUMBER_OF_BLOCKS + 1) * 2 - read_block_num - 1);
+    read_sensor_register(BOTTOM_HALF, (uint8_t *)&RAMoutput[bottomblock], BLOCK_LENGTH);
+
+    read_block_num++;
+
+    if (read_block_num < NUMBER_OF_BLOCKS)
+    {
+        write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (uint8_t)(0x09 + (0x10 * read_block_num) + (0x04 * switch_ptat_vdd)));
+    }
+    else
+    {
+        if (read_eloffset_next_pic)
+        {
+            read_eloffset_next_pic = 0;
+
+            // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
+            // |  0  |  0  |  0  |  0  |   1   |    0     |   1   |    1   |
+            write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x0B + (0x04 * switch_ptat_vdd)));
+            new_offsets = 1;
+        }
+        else
+        {
+            if (picnum > 1)
+                state = 1;
+            picnum++;
+
+            if ((uint8_t)(picnum % READ_ELOFFSET_EVERYX) == 0)
+                read_eloffset_next_pic = 1;
+
+            if (DevConst.PTATVDDSwitch)
+                switch_ptat_vdd ^= 1;
+
+            read_block_num = 0;
+
+            // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
+            // |  0  |  0  |  0  |  0  |   1   |    0     |   0   |    1   |
+            write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x09 + (0x04 * switch_ptat_vdd)));
+        }
+    }
+
+    add_repeating_timer_us(-timert, timer_callback, nullptr, &timer);
+    ReadingRoutineEnable = 1;
+}
+
+void sort_data()
+{
+
+    unsigned long sum = 0;
+    unsigned short pos = 0;
+
+    for (int m = 0; m < DevConst.RowPerBlock; m++)
+    {
+        for (int n = 0; n < DevConst.PixelPerRow; n++)
+        {
+
+            /*
+               for example: a normal line of RAMoutput for HTPAd80x64 looks like:
+               RAMoutput[0][] = [ PTAT(MSB), PTAT(LSB), DATA0[MSB], DATA0[LSB], DATA1[MSB], DATA1[LSB], ... , DATA640[MSB], DATA640LSB];
+                                                            |
+                                                            |-- DATA_Pos = 2 (first data byte)
+            */
+            pos = (unsigned short)(2 * n + DevConst.DataPos + m * 2 * DevConst.PixelPerRow);
+
+            /******************************************************************************************************************
+              new PIXEL values
+            ******************************************************************************************************************/
+            for (int i = 0; i < DevConst.NumberOfBlocks; i++)
+            {
+                // top half
+                data_pixel[m + i * DevConst.RowPerBlock][n] =
+                    (unsigned short)(RAMoutput[i][pos] << 8 | RAMoutput[i][pos + 1]);
+                // bottom half
+                data_pixel[DevConst.PixelPerColumn - 1 - m - i * DevConst.RowPerBlock][n] =
+                    (unsigned short)(RAMoutput[2 * DevConst.NumberOfBlocks + 2 - i - 1][pos] << 8 | RAMoutput[2 * DevConst.NumberOfBlocks + 2 - i - 1][pos + 1]);
+            }
+
+            /******************************************************************************************************************
+              new electrical offset values (store them in electrical offset buffer and calculate the average for pixel compensation
+            ******************************************************************************************************************/
+            if (picnum % ELOFFSETS_BUFFER_SIZE == 1)
+            {
+                if ((!eloffset[m][n]) || (picnum < ELOFFSETS_FILTER_START_DELAY))
+                {
+                    // top half
+                    eloffset[m][n] = (unsigned short)(RAMoutput[DevConst.NumberOfBlocks][pos] << 8 | RAMoutput[DevConst.NumberOfBlocks][pos + 1]);
+                    // bottom half
+                    eloffset[2 * DevConst.RowPerBlock - 1 - m][n] = (unsigned short)(RAMoutput[DevConst.NumberOfBlocks + 1][pos] << 8 | RAMoutput[DevConst.NumberOfBlocks + 1][pos + 1]);
+                    use_eloffsets_buffer = 1;
+                }
+                else
+                {
+                    // use a moving average filter
+                    // top half
+                    sum = (unsigned long)eloffset[m][n] * (unsigned long)(ELOFFSETS_BUFFER_SIZE - 1);
+                    sum += (unsigned long)(RAMoutput[DevConst.NumberOfBlocks][pos] << 8 | RAMoutput[DevConst.NumberOfBlocks][pos + 1]);
+                    eloffset[m][n] = (unsigned short)((float)sum / ELOFFSETS_BUFFER_SIZE + 0.5);
+                    // bottom half
+                    sum = (unsigned long)eloffset[2 * DevConst.RowPerBlock - 1 - m][n] * (unsigned long)(ELOFFSETS_BUFFER_SIZE - 1);
+                    sum += (unsigned long)(RAMoutput[DevConst.NumberOfBlocks + 1][pos] << 8 | RAMoutput[DevConst.NumberOfBlocks + 1][pos + 1]);
+                    eloffset[2 * DevConst.RowPerBlock - 1 - m][n] = (unsigned short)((float)sum / ELOFFSETS_BUFFER_SIZE + 0.5);
+                }
+            }
+        }
+    }
+
+    /******************************************************************************************************************
+      new PTAT values (store them in PTAT buffer and calculate the average for pixel compensation
+    ******************************************************************************************************************/
+    if (switch_ptat_vdd == 1)
+    {
+        sum = 0;
+        // calculate ptat average (datasheet, chapter: 11.1 Ambient Temperature )
+        for (int i = 0; i < DevConst.NumberOfBlocks; i++)
+        {
+            // block top half
+            sum += (unsigned short)(RAMoutput[i][DevConst.PTATPos] << 8 | RAMoutput[i][DevConst.PTATPos + 1]);
+            // block bottom half
+            sum += (unsigned short)(RAMoutput[2 * DevConst.NumberOfBlocks - i + 1][DevConst.PTATPos] << 8 | RAMoutput[2 * DevConst.NumberOfBlocks - i + 1][DevConst.PTATPos + 1]);
+        }
+        ptat_av_uint16 = (unsigned short)((float)sum / (float)(2.0 * DevConst.NumberOfBlocks));
+        Ta = (unsigned short)((unsigned short)ptat_av_uint16 * (float)ptatgr_float + (float)ptatoff_float);
+
+        ptat_buffer[ptat_i] = ptat_av_uint16;
+        ptat_i++;
+        if (ptat_i == PTAT_BUFFER_SIZE)
+        {
+            if (use_ptat_buffer == 0)
+            {
+                // Serial.print(" | PTAT buffer complete");
+                use_ptat_buffer = 1;
+            }
+            ptat_i = 0;
+        }
+
+        if (use_ptat_buffer)
+        {
+            // now overwrite the old ptat average
+            sum = 0;
+            for (int i = 0; i < PTAT_BUFFER_SIZE; i++)
+            {
+                sum += ptat_buffer[i];
+            }
+            ptat_av_uint16 = (uint16_t)((float)sum / PTAT_BUFFER_SIZE);
+        }
+    }
+
+    /******************************************************************************************************************
+      new VDD values (store them in VDD buffer and calculate the average for pixel compensation
+    ******************************************************************************************************************/
+    if (switch_ptat_vdd == 0)
+    {
+        sum = 0;
+        // calculate vdd average (datasheet, chapter: 11.4 Vdd Compensation )
+        for (int i = 0; i < DevConst.NumberOfBlocks; i++)
+        {
+            // block top half
+            sum += (unsigned short)(RAMoutput[i][DevConst.VDDPos] << 8 | RAMoutput[i][DevConst.VDDPos + 1]);
+            // block bottom half
+            sum += (unsigned short)(RAMoutput[2 * DevConst.NumberOfBlocks - i + 1][DevConst.VDDPos] << 8 | RAMoutput[2 * DevConst.NumberOfBlocks - i + 1][DevConst.VDDPos + 1]);
+        }
+        vdd_av_uint16 = (unsigned short)((float)sum / (float)(2.0 * DevConst.NumberOfBlocks));
+
+        // write into vdd buffer
+        vdd_buffer[vdd_i] = vdd_av_uint16;
+        vdd_i++;
+        if (vdd_i == VDD_BUFFER_SIZE)
+        {
+            if (use_vdd_buffer == 0)
+            {
+                // Serial.print(" | VDD buffer complete");
+                use_vdd_buffer = 1;
+            }
+            vdd_i = 0;
+        }
+        if (use_vdd_buffer)
+        {
+            sum = 0;
+            for (int i = 0; i < VDD_BUFFER_SIZE; i++)
+            {
+                sum += vdd_buffer[i];
+            }
+            // now overwrite the old vdd average
+            vdd_av_uint16 = (uint16_t)((float)sum / VDD_BUFFER_SIZE);
+        }
+    }
+}
+
+void calculate_pixel_temp()
+{
+
+    int64_t vij_pixc_and_pcscaleval;
+    int64_t pixcij;
+    int64_t vdd_calc_steps;
+    uint16_t table_row, table_col;
+    int32_t vx, vy, ydist, dta;
+    signed long pixel;
+    pixc2 = pixc2_0; // set pointer to start address of the allocated heap
+
+    /******************************************************************************************************************
+      step 0: find column of lookup table
+    ******************************************************************************************************************/
+    for (int i = 0; i < NROFTAELEMENTS; i++)
+    {
+        if (Ta > XTATemps[i])
+        {
+            table_col = i;
+        }
+    }
+    dta = Ta - XTATemps[table_col];
+    ydist = (int32_t)ADEQUIDISTANCE;
+
+    for (int m = 0; m < DevConst.PixelPerColumn; m++)
+    {
+        for (int n = 0; n < DevConst.PixelPerRow; n++)
+        {
+
+            /******************************************************************************************************************
+               step 1: use a variable with bigger data format for the compensation steps
+             ******************************************************************************************************************/
+            pixel = (signed long)data_pixel[m][n];
+
+            /******************************************************************************************************************
+               step 2: compensate thermal drifts (see datasheet, chapter: Thermal Offset)
+             ******************************************************************************************************************/
+            pixel -= (int32_t)(((int32_t)thgrad[m][n] * (int32_t)ptat_av_uint16) / (int32_t)gradscale_div);
+            pixel -= (int32_t)thoffset[m][n];
+
+            /******************************************************************************************************************
+               step 3: compensate electrical offset (see datasheet, chapter: Electrical Offset)
+             ******************************************************************************************************************/
+            if (m < DevConst.PixelPerColumn / 2)
+            { // top half
+                pixel -= eloffset[m % DevConst.RowPerBlock][n];
+            }
+            else
+            { // bottom half
+                pixel -= eloffset[m % DevConst.RowPerBlock + DevConst.RowPerBlock][n];
+            }
+
+            /******************************************************************************************************************
+               step 4: compensate vdd (see datasheet, chapter: Vdd Compensation)
+             ******************************************************************************************************************/
+            // first select VddCompGrad and VddCompOff for pixel m,n:
+            if (m < DevConst.PixelPerColumn / 2)
+            { // top half
+                vddcompgrad_n = vddcompgrad[m % DevConst.RowPerBlock][n];
+                vddcompoff_n = vddcompoff[m % DevConst.RowPerBlock][n];
+            }
+            else
+            { // bottom half
+                vddcompgrad_n = vddcompgrad[m % DevConst.RowPerBlock + DevConst.RowPerBlock][n];
+                vddcompoff_n = vddcompoff[m % DevConst.RowPerBlock + DevConst.RowPerBlock][n];
+            }
+            // now do the vdd calculation
+            vdd_calc_steps = vddcompgrad_n * ptat_av_uint16;
+            vdd_calc_steps = vdd_calc_steps / vddscgrad_div;
+            vdd_calc_steps = vdd_calc_steps + vddcompoff_n;
+            vdd_calc_steps = vdd_calc_steps * (vdd_av_uint16 - vddth1 - ((vddth2 - vddth1) / (ptatth2 - ptatth1)) * (ptat_av_uint16 - ptatth1));
+            vdd_calc_steps = vdd_calc_steps / vddscoff_div;
+            pixel -= vdd_calc_steps;
+
+            /******************************************************************************************************************
+               step 5: multiply sensitivity coeff for each pixel (see datasheet, chapter: Object Temperature)
+             ******************************************************************************************************************/
+            vij_pixc_and_pcscaleval = pixel * (int64_t)PCSCALEVAL;
+            pixel = (int32_t)(vij_pixc_and_pcscaleval / *pixc2);
+            pixc2++;
+            /******************************************************************************************************************
+               step 6: find correct temp for this sensor in lookup table and do a bilinear interpolation (see datasheet, chapter:  Look-up table)
+             ******************************************************************************************************************/
+            table_row = pixel + TABLEOFFSET;
+            table_row = table_row >> ADEXPBITS;
+            // bilinear interpolation
+            vx = ((((int32_t)TempTable[table_row][table_col + 1] - (int32_t)TempTable[table_row][table_col]) * (int32_t)dta) / (int32_t)TAEQUIDISTANCE) + (int32_t)TempTable[table_row][table_col];
+            vy = ((((int32_t)TempTable[table_row + 1][table_col + 1] - (int32_t)TempTable[table_row + 1][table_col]) * (int32_t)dta) / (int32_t)TAEQUIDISTANCE) + (int32_t)TempTable[table_row + 1][table_col];
+            pixel = (uint32_t)((vy - vx) * ((int32_t)(pixel + TABLEOFFSET) - (int32_t)YADValues[table_row]) / ydist + (int32_t)vx);
+
+            /******************************************************************************************************************
+               step 7: add GlobalOffset (stored as signed char)
+             ******************************************************************************************************************/
+            pixel += globaloff;
+
+            /******************************************************************************************************************
+              step 8: overwrite the uncompensate pixel with the new calculated compensated value
+            ******************************************************************************************************************/
+            data_pixel[m][n] = (unsigned short)pixel;
+        }
+    }
+
+    /******************************************************************************************************************
+      step 8: overwrite the uncompensate pixel with the new calculated compensated value
+    ******************************************************************************************************************/
+    // TODO:
+    // pixel_masking();
+}
+
+void print_final_array(void)
+{
+    printf("\n\n---pixel data---\n");
+    for (int m = 0; m < DevConst.PixelPerColumn; m++)
+    {
+        for (int n = 0; n < DevConst.PixelPerRow; n++)
+        {
+            printf("%04X", data_pixel[m][n]);
+        }
+        printf("\n");
+    }
+}
+
+void print_RAM_array(void)
+{
+    printf("\n\n---pixel data ---\n");
+    for (int m = 0; m < (2 * NUMBER_OF_BLOCKS + 2); m++)
+    {
+        for (int n = 0; n < BLOCK_LENGTH; n++)
+        {
+            printf("%02X", RAMoutput[m][n]);
+        }
+        printf("\n");
     }
 }
 
@@ -264,7 +692,6 @@ int main()
     stdio_init_all();
     getchar(); // blocking program so i can open serial monitor and get output
 
-    // TODO: CHECK IF 400KHz WORKS FOR BOTH DEVICES
     i2c_init(I2C_PORT, CLOCK_SENSOR);
 
     gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
@@ -273,7 +700,6 @@ int main()
     gpio_pull_up(I2C_SCL);
 
     // reading whole EEPROM
-    // TODO: TEST THAT SHIT
     read_eeprom();
 
     // to wake up sensor set configuration register to 0x01
@@ -283,7 +709,7 @@ int main()
     sleep_ms(30);
 
     // write the calibration settings into the trim registers
-    write_calibration_settings_to_sensor();
+    // write_calibration_settings_to_sensor();
 
     // to start sensor set configuration register to 0x09
     // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
@@ -298,169 +724,45 @@ int main()
     vddscoff_div = pow(2, vddscoff);
     calcPixC();
 
+    print_state = 1;
+
     // timer initialization
-    timert = calc_timert(clk_calib, mbit_calib);
-    repeating_timer_t timer;
-    add_repeating_timer_us(-timert, [](repeating_timer_t *t)
-                           {
-                               timer_callback();
-                               return true; // Return true to keep the timer repeating
-                           },
-                           nullptr, &timer);
+    timert = calc_timert(clk_calib, mbit_calib); // chyba około 25 ms
+    printf("timert: %d\n", timert);
+    add_repeating_timer_us(-timert, timer_callback, nullptr, &timer);
 
     // Loopin time!!
     while (true)
     {
-    }
-
-    // Htpa32x32d configuration
-    {
-        uint8_t cmd[2];
-        uint8_t trims[] = {0x0C, 0x0C, 0x0C, 0x14, 0x0C, 0x0C, 0x88};
-        for (size_t i = 0; i < 7; i++)
+        if (NewDataAvailable)
         {
-            cmd[0] = HtpaRegister::Trim1 + i;
-            cmd[1] = trims[i];
-            i2c_write_blocking(I2C_PORT, HTPA_I2C_ADDR, cmd, 2, false);
-            sleep_ms(5);
+            readblockinterrupt();
+            NewDataAvailable = 0;
         }
-    }
-
-    // Checking sensor status
-    print_sensor_status();
-
-    while (true)
-    {
-        char ch;
-        ch = getchar();
-        if (ch == 'q')
-            break;
-
-        // Start procedure
+        else
         {
-            uint8_t cmd[2] = {HtpaRegister::Configuration, 0x09};
-            i2c_write_blocking(I2C_PORT, HTPA_I2C_ADDR, cmd, 2, false);
-            sleep_ms(30);
+            sleep_ms(1);
         }
 
-        // Checking sensor status
-        print_sensor_status(); // should be 0x01
-
-        // Reading data
-        uint8_t data[2048] = {0};
-        read_all(data, 2048);
-
-        for (size_t i = 0; i < 2048; i++)
+        if (state)
         {
-            if (i % 64 == 0 && i != 0)
-                printf("\n");
-            printf("%02X", data[i]);
+            sort_data();
+            state = 0;
+
+            if (print_state == 1)
+            {
+                calculate_pixel_temp();
+                print_final_array();
+            }
+
+            if (print_state == 2)
+            {
+                print_RAM_array();
+            }
         }
-        printf("\n");
+        else
+        {
+            sleep_ms(1);
+        }
     }
-
-    // Sleep sensor
-    uint8_t cmd[2] = {HtpaRegister::Configuration, 0x00};
-    i2c_write_blocking(I2C_PORT, HTPA_I2C_ADDR, cmd, 2, false);
-    sleep_ms(30);
-    printf("\nSensor sleeped\n");
-}
-
-uint8_t get_sensor_status()
-{
-    uint8_t cmd = HtpaRegister::Status;
-    uint8_t status;
-    i2c_write_blocking(I2C_PORT, HTPA_I2C_ADDR, &cmd, 1, true);
-    i2c_read_blocking(I2C_PORT, HTPA_I2C_ADDR, &status, 1, false);
-    sleep_ms(5);
-
-    return status;
-}
-
-void print_sensor_status()
-{
-    printf("Sensor status: 0x%02X\n", get_sensor_status());
-}
-
-void read_block(Block block, uint8_t *top_data, size_t top_len, uint8_t *bottom_data, size_t bottom_len)
-{
-    if (top_len < 258 || bottom_len < 258)
-        return;
-
-    // setting up block
-    {
-        uint8_t cmd_data = (block << 4) | 0x09u;
-        uint8_t cmd[2] = {HtpaRegister::Configuration, cmd_data};
-        i2c_write_blocking(I2C_PORT, HTPA_I2C_ADDR, cmd, 2, false);
-        sleep_ms(30);
-    }
-
-    uint8_t top_cmd = HtpaRegister::ReadTop;
-    uint8_t bottom_cmd = HtpaRegister::ReadBottom;
-    i2c_write_blocking(I2C_PORT, HTPA_I2C_ADDR, &top_cmd, 1, true);
-    i2c_read_blocking(I2C_PORT, HTPA_I2C_ADDR, top_data, 258, false);
-    i2c_write_blocking(I2C_PORT, HTPA_I2C_ADDR, &bottom_cmd, 1, true);
-    i2c_read_blocking(I2C_PORT, HTPA_I2C_ADDR, bottom_data, 258, false);
-}
-
-void cpy_array(uint8_t *src, uint8_t *dst, size_t len)
-{
-    for (size_t i = 0; i < len; i++)
-        dst[i] = src[i];
-}
-
-void read_all(uint8_t *data, size_t len)
-{
-    if (len < 2048)
-        return;
-
-    uint8_t blk0top[258] = {0};
-    uint8_t blk1top[258] = {0};
-    uint8_t blk2top[258] = {0};
-    uint8_t blk3top[258] = {0};
-    uint8_t blk3bottom[258] = {0};
-    uint8_t blk2bottom[258] = {0};
-    uint8_t blk1bottom[258] = {0};
-    uint8_t blk0bottom[258] = {0};
-
-    uint8_t *data_raw[8] = {
-        blk0top,
-        blk1top,
-        blk2top,
-        blk3top,
-        blk3bottom,
-        blk2bottom,
-        blk1bottom,
-        blk0bottom,
-    };
-
-    read_block(Block::Block0, blk0top, 258, blk0bottom, 258);
-    read_block(Block::Block1, blk1top, 258, blk1bottom, 258);
-    read_block(Block::Block2, blk2top, 258, blk2bottom, 258);
-    read_block(Block::Block3, blk3top, 258, blk3bottom, 258);
-
-    cpy_array(blk0top + 2, data, 256);
-    cpy_array(blk1top + 2, data + 256, 256);
-    cpy_array(blk2top + 2, data + 512, 256);
-    cpy_array(blk3top + 2, data + 768, 256);
-
-    cpy_array(blk3bottom + 2 + 192, data + 1024, 64);
-    cpy_array(blk3bottom + 2 + 128, data + 1024 + 64, 64);
-    cpy_array(blk3bottom + 2 + 64, data + 1024 + 128, 64);
-    cpy_array(blk3bottom + 2, data + 1024 + 192, 64);
-
-    cpy_array(blk2bottom + 2 + 192, data + 1280, 64);
-    cpy_array(blk2bottom + 2 + 128, data + 1280 + 64, 64);
-    cpy_array(blk2bottom + 2 + 64, data + 1280 + 128, 64);
-    cpy_array(blk2bottom + 2, data + 1280 + 192, 64);
-
-    cpy_array(blk1bottom + 2 + 192, data + 1536, 64);
-    cpy_array(blk1bottom + 2 + 128, data + 1536 + 64, 64);
-    cpy_array(blk1bottom + 2 + 64, data + 1536 + 128, 64);
-    cpy_array(blk1bottom + 2, data + 1536 + 192, 64);
-
-    cpy_array(blk0bottom + 2 + 192, data + 1792, 64);
-    cpy_array(blk0bottom + 2 + 128, data + 1792 + 64, 64);
-    cpy_array(blk0bottom + 2 + 64, data + 1792 + 128, 64);
-    cpy_array(blk0bottom + 2, data + 1792 + 192, 64);
 }

@@ -45,7 +45,7 @@
 #define ATC_POS 0			 // postion of the cyclops in block reading order
 #define PTAT_POS 0			 // position of PTAT in block reading order
 #define VDD_POS 0			 // postion of VDD in block reading order
-#define PTAT_VDD_SWITCH 1	 // 1 - PTAT and VDD alternate after each pic / 0 - not
+#define PTAT_VDD_SWITCH 1	 // 1 - PTAT and VDD alternate after each pic / 0 - not	
 #define BLOCK_LENGTH 258	 // number of char in each block
 #define DATA_POS 2			 // position of first data byte in each block
 

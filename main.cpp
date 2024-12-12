@@ -687,6 +687,28 @@ void print_RAM_array(void)
     }
 }
 
+void dump_whole_eeprom()
+{
+    printf("EEPROM from 0x0000 to 0x1F3F (useful data end)\n");
+    for (uint16_t address = 0x0000; address < 0x1F40; address += 0x0010)
+    {
+        uint8_t rdata[16] = {0};
+        uint8_t memory_address[2] = {
+            static_cast<uint8_t>(address >> 8),
+            static_cast<uint8_t>(address & 0xFF),
+        };
+
+        i2c_write_blocking(I2C_PORT, EEPROM_ADDRESS, memory_address, 2, true);
+        i2c_read_blocking(I2C_PORT, EEPROM_ADDRESS, rdata, 16, false);
+
+        for (int i = 0; i < 16; i++)
+        {
+            printf("%02X", rdata[i]);
+        }
+        printf("\n");
+    }
+}
+
 int main()
 {
     stdio_init_all();
@@ -700,7 +722,10 @@ int main()
     gpio_pull_up(I2C_SCL);
 
     // reading whole EEPROM
-    read_eeprom();
+    // read_eeprom();
+    dump_whole_eeprom();
+
+    return 0;
 
     // to wake up sensor set configuration register to 0x01
     // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |

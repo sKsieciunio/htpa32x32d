@@ -50,16 +50,15 @@ characteristics DevConst = {
 
 // EEPROM data
 uint8_t mbit_calib, bias_calib, clk_calib, bpa_calib, pu_calib, mbit_user, bias_user, clk_user, bpa_user, pu_user;
-uint8_t gradscale, vddscgrad, vddscoff, epsilon;
-
+uint8_t nrofdefpix, gradscale, vddscgrad, vddscoff, epsilon, lastepsilon, arraytype;
+uint8_t deadpixmask[ALLOWED_DEADPIX];
 int8_t globaloff;
-
-uint8_t tablenumber, vddth1, vddth2, ptatth1, ptatth2, globalgain;
-
-signed short thgrad[PIXEL_PER_COLUMN][PIXEL_PER_ROW];
-signed short thoffset[PIXEL_PER_COLUMN][PIXEL_PER_ROW];
-signed short vddcompgrad[ROW_PER_BLOCK * 2][PIXEL_PER_ROW]; // TODO:
-signed short vddcompoff[ROW_PER_BLOCK * 2][PIXEL_PER_ROW];  // TODO:
+int16_t thgrad[PIXEL_PER_COLUMN][PIXEL_PER_ROW];
+uint16_t tablenumber, vddth1, vddth2, ptatth1, ptatth2, ptatgr, globalgain;
+uint16_t deadpixadr[ALLOWED_DEADPIX * 2];
+int16_t thoffset[PIXEL_PER_COLUMN][PIXEL_PER_ROW];
+int16_t vddcompgrad[ROW_PER_BLOCK * 2][PIXEL_PER_ROW];
+int16_t vddcompoff[ROW_PER_BLOCK * 2][PIXEL_PER_ROW];
 
 float ptatgr_float, ptatoff_float, pixcmin, pixcmax;
 // use a heap allocated memory to store the pixc instead of a nxm array

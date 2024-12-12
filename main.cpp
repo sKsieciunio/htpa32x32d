@@ -165,6 +165,7 @@ void read_eeprom()
     clk_user = read_EEPROM_byte(E_CLK_USER);
     bpa_user = read_EEPROM_byte(E_BPA_USER);
     pu_user = read_EEPROM_byte(E_PU_USER);
+    // TODO: vddth are uint16
     vddth1 = read_EEPROM_byte(E_VDDTH1_2) << 8 | read_EEPROM_byte(E_VDDTH1_1);
     vddth2 = read_EEPROM_byte(E_VDDTH2_2) << 8 | read_EEPROM_byte(E_VDDTH2_1);
     vddscgrad = read_EEPROM_byte(E_VDDSCGRAD);

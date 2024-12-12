@@ -29,6 +29,10 @@ def get_n_sint16(data: bytearray, offset: int, n: int) -> list:
     return [get_sint16(data, offset + i * 2) for i in range(n)]
 
 
+def get_uint32(data: bytearray, offset: int) -> int:
+    return struct.unpack('<I', data[offset:offset + 4])[0]
+
+
 with open('./Sensor0_dump.txt', 'r') as file:
     hex_content = ''.join(file.read().split('\n')[3:])
 
@@ -69,6 +73,7 @@ print("CLK(user): ", get_uint8(bytes_array, 0x0062))
 print("BPA(user): ", get_uint8(bytes_array, 0x0063))
 print("PU(user): ", get_uint8(bytes_array, 0x0064))
 
+print("DeviceID: ", get_uint32(bytes_array, 0x0074))
 print("NrOfDefPix: ", get_uint8(bytes_array, 0x007F))
 
 print("DeadPixAdr: ", get_n_uint16(bytes_array, 0x0080, 8 * 3))

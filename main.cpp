@@ -59,12 +59,12 @@ uint16_t deadpixadr[ALLOWED_DEADPIX * 2];
 int16_t thoffset[PIXEL_PER_COLUMN][PIXEL_PER_ROW];
 int16_t vddcompgrad[ROW_PER_BLOCK * 2][PIXEL_PER_ROW];
 int16_t vddcompoff[ROW_PER_BLOCK * 2][PIXEL_PER_ROW];
-
-float ptatgr_float, ptatoff_float, pixcmin, pixcmax;
+uint32_t id, ptatoff;
+float ptatgr_float, ptatoff_float, pixcmin, pixcmax, bw;
 // use a heap allocated memory to store the pixc instead of a nxm array
 // ^thats not true anymore
-unsigned long pixc2_0[NUMBER_OF_PIXEL]; // start address of the allocated heap memory
-unsigned long *pixc2;                   // increasing address pointer
+uint32_t pixc2_0[NUMBER_OF_PIXEL]; // start address of the allocated heap memory
+uint32_t *pixc2;                   // increasing address pointer
 
 // SENSOR DATA
 uint16_t data_pixel[PIXEL_PER_COLUMN][PIXEL_PER_ROW];
@@ -92,31 +92,41 @@ uint16_t Ta, ptat_av_uint16, vdd_av_uint16;
 // BUFFER for PTAT, VDD, and elOffsets
 // PTAT:
 uint16_t ptat_buffer[PTAT_BUFFER_SIZE];
+uint16_t ptat_buffer_average;
 uint8_t use_ptat_buffer = 0;
 uint8_t ptat_i = 0;
+uint8_t PTATok = 0;
 // VDD:
 uint16_t vdd_buffer[VDD_BUFFER_SIZE];
+uint16_t vdd_buffer_average;
 uint8_t use_vdd_buffer = 0;
 uint8_t vdd_i = 0;
 // electrical offsets:
 uint8_t use_eloffsets_buffer = 0;
+uint8_t eloffset_i = 0;
 uint8_t new_offsets = 1;
 
 // PROGRAM CONTROL
 bool switch_ptat_vdd = 0;
+uint8_t adr_offset = 0x00;
+uint8_t send_data = 0;
 uint16_t picnum = 0;
 uint8_t state = 0;
 uint8_t read_block_num = START_WITH_BLOCK;
 uint8_t read_eloffset_next_pic = 0;
+uint8_t gui_mode = 0;
+uint8_t wait_pic = 0;
 bool ReadingRoutineEnable = 1;
 
 // OTHER
 uint32_t gradscale_div, vddscgrad_div, vddscoff_div;
 int vddcompgrad_n;
 int vddcompoff_n;
+uint32_t t1;
 uint8_t print_state = 0;
 
 unsigned NewDataAvailable = 1;
+
 unsigned short timert;
 repeating_timer_t timer;
 

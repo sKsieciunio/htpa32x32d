@@ -707,6 +707,7 @@ void dump_whole_eeprom()
             printf("%02X", rdata[i]);
         }
         printf("\n");
+        sleep_ms(5);
     }
 }
 

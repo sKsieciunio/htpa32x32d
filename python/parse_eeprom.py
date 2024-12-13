@@ -33,7 +33,9 @@ def get_uint32(data: bytearray, offset: int) -> int:
     return struct.unpack('<I', data[offset:offset + 4])[0]
 
 
-with open('./Sensor0_dump.txt', 'r') as file:
+# sensor no 2 is one with different focal lenght
+sensor_number = 2
+with open(f"Sensor{sensor_number}_dump.txt", 'r') as file:
     hex_content = ''.join(file.read().split('\n')[3:])
 
 bytes_array = bytearray.fromhex(hex_content)

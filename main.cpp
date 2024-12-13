@@ -718,7 +718,7 @@ int main()
     sleep_ms(30);
 
     // write the calibration settings into the trim registers
-    // write_calibration_settings_to_sensor();
+    write_calibration_settings_to_sensor();
 
     // to start sensor set configuration register to 0x09
     // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |

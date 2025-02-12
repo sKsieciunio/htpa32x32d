@@ -370,8 +370,12 @@ void readblockinterrupt()
     read_sensor_register(STATUS_REGISTER, &statusreg, 1);
     while (statusreg & 0x01 == 0)
     {
+        printf("\tchecking EOC inside while loop\n");
         read_sensor_register(STATUS_REGISTER, &statusreg, 1);
     }
+
+    printf("\tReading from block number: %d", read_block_num);
+    switch_ptat_vdd ? printf(" (vdd)\n") : printf(" (ptat)\n");
 
     read_sensor_register(TOP_HALF, (uint8_t *)&RAMoutput[read_block_num], BLOCK_LENGTH);
     bottomblock = (uint8_t)((uint8_t)(NUMBER_OF_BLOCKS + 1) * 2 - read_block_num - 1);
@@ -399,6 +403,7 @@ void readblockinterrupt()
             if (picnum > 1)
                 state = 1;
             picnum++;
+            printf("\tpicnum (after increment): %d\n", picnum);
 
             if ((uint8_t)(picnum % READ_ELOFFSET_EVERYX) == 0)
                 read_eloffset_next_pic = 1;
@@ -463,18 +468,18 @@ void sort_data()
                     eloffset[2 * DevConst.RowPerBlock - 1 - m][n] = (unsigned short)(RAMoutput[DevConst.NumberOfBlocks + 1][pos] << 8 | RAMoutput[DevConst.NumberOfBlocks + 1][pos + 1]);
                     use_eloffsets_buffer = 1;
                 }
-                else
-                {
-                    // use a moving average filter
-                    // top half
-                    sum = (unsigned long)eloffset[m][n] * (unsigned long)(ELOFFSETS_BUFFER_SIZE - 1);
-                    sum += (unsigned long)(RAMoutput[DevConst.NumberOfBlocks][pos] << 8 | RAMoutput[DevConst.NumberOfBlocks][pos + 1]);
-                    eloffset[m][n] = (unsigned short)((float)sum / ELOFFSETS_BUFFER_SIZE + 0.5);
-                    // bottom half
-                    sum = (unsigned long)eloffset[2 * DevConst.RowPerBlock - 1 - m][n] * (unsigned long)(ELOFFSETS_BUFFER_SIZE - 1);
-                    sum += (unsigned long)(RAMoutput[DevConst.NumberOfBlocks + 1][pos] << 8 | RAMoutput[DevConst.NumberOfBlocks + 1][pos + 1]);
-                    eloffset[2 * DevConst.RowPerBlock - 1 - m][n] = (unsigned short)((float)sum / ELOFFSETS_BUFFER_SIZE + 0.5);
-                }
+                // else
+                // {
+                //     // use a moving average filter
+                //     // top half
+                //     sum = (unsigned long)eloffset[m][n] * (unsigned long)(ELOFFSETS_BUFFER_SIZE - 1);
+                //     sum += (unsigned long)(RAMoutput[DevConst.NumberOfBlocks][pos] << 8 | RAMoutput[DevConst.NumberOfBlocks][pos + 1]);
+                //     eloffset[m][n] = (unsigned short)((float)sum / ELOFFSETS_BUFFER_SIZE + 0.5);
+                //     // bottom half
+                //     sum = (unsigned long)eloffset[2 * DevConst.RowPerBlock - 1 - m][n] * (unsigned long)(ELOFFSETS_BUFFER_SIZE - 1);
+                //     sum += (unsigned long)(RAMoutput[DevConst.NumberOfBlocks + 1][pos] << 8 | RAMoutput[DevConst.NumberOfBlocks + 1][pos + 1]);
+                //     eloffset[2 * DevConst.RowPerBlock - 1 - m][n] = (unsigned short)((float)sum / ELOFFSETS_BUFFER_SIZE + 0.5);
+                // }
             }
         }
     }
@@ -496,28 +501,28 @@ void sort_data()
         ptat_av_uint16 = (unsigned short)((float)sum / (float)(2.0 * DevConst.NumberOfBlocks));
         Ta = (unsigned short)((unsigned short)ptat_av_uint16 * (float)ptatgr_float + (float)ptatoff_float);
 
-        ptat_buffer[ptat_i] = ptat_av_uint16;
-        ptat_i++;
-        if (ptat_i == PTAT_BUFFER_SIZE)
-        {
-            if (use_ptat_buffer == 0)
-            {
-                // Serial.print(" | PTAT buffer complete");
-                use_ptat_buffer = 1;
-            }
-            ptat_i = 0;
-        }
+        // ptat_buffer[ptat_i] = ptat_av_uint16;
+        // ptat_i++;
+        // if (ptat_i == PTAT_BUFFER_SIZE)
+        // {
+        //     if (use_ptat_buffer == 0)
+        //     {
+        //         // Serial.print(" | PTAT buffer complete");
+        //         use_ptat_buffer = 1;
+        //     }
+        //     ptat_i = 0;
+        // }
 
-        if (use_ptat_buffer)
-        {
-            // now overwrite the old ptat average
-            sum = 0;
-            for (int i = 0; i < PTAT_BUFFER_SIZE; i++)
-            {
-                sum += ptat_buffer[i];
-            }
-            ptat_av_uint16 = (uint16_t)((float)sum / PTAT_BUFFER_SIZE);
-        }
+        // if (use_ptat_buffer)
+        // {
+        //     // now overwrite the old ptat average
+        //     sum = 0;
+        //     for (int i = 0; i < PTAT_BUFFER_SIZE; i++)
+        //     {
+        //         sum += ptat_buffer[i];
+        //     }
+        //     ptat_av_uint16 = (uint16_t)((float)sum / PTAT_BUFFER_SIZE);
+        // }
     }
 
     /******************************************************************************************************************
@@ -537,27 +542,27 @@ void sort_data()
         vdd_av_uint16 = (unsigned short)((float)sum / (float)(2.0 * DevConst.NumberOfBlocks));
 
         // write into vdd buffer
-        vdd_buffer[vdd_i] = vdd_av_uint16;
-        vdd_i++;
-        if (vdd_i == VDD_BUFFER_SIZE)
-        {
-            if (use_vdd_buffer == 0)
-            {
-                // Serial.print(" | VDD buffer complete");
-                use_vdd_buffer = 1;
-            }
-            vdd_i = 0;
-        }
-        if (use_vdd_buffer)
-        {
-            sum = 0;
-            for (int i = 0; i < VDD_BUFFER_SIZE; i++)
-            {
-                sum += vdd_buffer[i];
-            }
-            // now overwrite the old vdd average
-            vdd_av_uint16 = (uint16_t)((float)sum / VDD_BUFFER_SIZE);
-        }
+        // vdd_buffer[vdd_i] = vdd_av_uint16;
+        // vdd_i++;
+        // if (vdd_i == VDD_BUFFER_SIZE)
+        // {
+        //     if (use_vdd_buffer == 0)
+        //     {
+        //         // Serial.print(" | VDD buffer complete");
+        //         use_vdd_buffer = 1;
+        //     }
+        //     vdd_i = 0;
+        // }
+        // if (use_vdd_buffer)
+        // {
+        //     sum = 0;
+        //     for (int i = 0; i < VDD_BUFFER_SIZE; i++)
+        //     {
+        //         sum += vdd_buffer[i];
+        //     }
+        //     // now overwrite the old vdd average
+        //     vdd_av_uint16 = (uint16_t)((float)sum / VDD_BUFFER_SIZE);
+        // }
     }
 }
 
@@ -741,12 +746,17 @@ int main()
     add_repeating_timer_us(-timert, timer_callback, nullptr, &timer);
 
     // Loopin time!!
+    int interation_count = 1;
+    int read_count = 1;
     while (true)
     {
+        printf("Iteration number: %d\n", interation_count);
         if (NewDataAvailable)
         {
+            printf("Read count: %d\n", read_count);
             readblockinterrupt();
             NewDataAvailable = 0;
+            read_count++;
         }
         else
         {
@@ -755,6 +765,7 @@ int main()
 
         if (state)
         {
+            printf("Sorting data\n");
             sort_data();
             state = 0;
 
@@ -773,5 +784,7 @@ int main()
         {
             sleep_ms(1);
         }
+        
+        interation_count++;
     }
 }

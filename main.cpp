@@ -127,300 +127,14 @@ uint32_t t1;
 unsigned NewDataAvailable = 1;
 
 unsigned short timert;
-repeating_timer_t timer;
 
-uint8_t get_sensor_status()
-{
-    uint8_t cmd = STATUS_REGISTER;
-    uint8_t status;
-    i2c_write_blocking(I2C_PORT, SENSOR_ADDRESS, &cmd, 1, true);
-    i2c_read_blocking(I2C_PORT, SENSOR_ADDRESS, &status, 1, false);
-
-    return status;
-}
-
-void print_sensor_status()
-{
-    printf("Sensor status: 0x%02X\n", get_sensor_status());
-}
-
-uint8_t read_EEPROM_byte(uint16_t address)
-{
-    uint8_t rdata = 0;
-    uint8_t memory_address[2] = {
-        static_cast<uint8_t>(address >> 8),
-        static_cast<uint8_t>(address & 0xFF),
-    };
-
-    i2c_write_blocking(I2C_PORT, EEPROM_ADDRESS, memory_address, 2, true);
-    i2c_read_blocking(I2C_PORT, EEPROM_ADDRESS, &rdata, 1, false);
-
-    return rdata;
-}
-
-void read_eeprom()
-{
-    int m = 0;
-    int n = 0;
-    uint8_t b[4];
-    mbit_calib = read_EEPROM_byte(E_MBIT_CALIB);
-    bias_calib = read_EEPROM_byte(E_BIAS_CALIB);
-    clk_calib = read_EEPROM_byte(E_CLK_CALIB);
-    bpa_calib = read_EEPROM_byte(E_BPA_CALIB);
-    pu_calib = read_EEPROM_byte(E_PU_CALIB);
-    mbit_user = read_EEPROM_byte(E_MBIT_USER);
-    bias_user = read_EEPROM_byte(E_BIAS_USER);
-    clk_user = read_EEPROM_byte(E_CLK_USER);
-    bpa_user = read_EEPROM_byte(E_BPA_USER);
-    pu_user = read_EEPROM_byte(E_PU_USER);
-    vddth1 = read_EEPROM_byte(E_VDDTH1_2) << 8 | read_EEPROM_byte(E_VDDTH1_1);
-    vddth2 = read_EEPROM_byte(E_VDDTH2_2) << 8 | read_EEPROM_byte(E_VDDTH2_1);
-    vddscgrad = read_EEPROM_byte(E_VDDSCGRAD);
-    vddscoff = read_EEPROM_byte(E_VDDSCOFF);
-    ptatth1 = read_EEPROM_byte(E_PTATTH1_2) << 8 | read_EEPROM_byte(E_PTATTH1_1);
-    ptatth2 = read_EEPROM_byte(E_PTATTH2_2) << 8 | read_EEPROM_byte(E_PTATTH2_1);
-
-    gradscale = read_EEPROM_byte(E_GRADSCALE);
-    tablenumber = read_EEPROM_byte(E_TABLENUMBER2) << 8 | read_EEPROM_byte(E_TABLENUMBER1);
-
-    b[0] = read_EEPROM_byte(E_PTATGR_1);
-    b[1] = read_EEPROM_byte(E_PTATGR_2);
-    b[2] = read_EEPROM_byte(E_PTATGR_3);
-    b[3] = read_EEPROM_byte(E_PTATGR_4);
-    ptatgr_float = *(float *)b;
-    b[0] = read_EEPROM_byte(E_PTATOFF_1);
-    b[1] = read_EEPROM_byte(E_PTATOFF_2);
-    b[2] = read_EEPROM_byte(E_PTATOFF_3);
-    b[3] = read_EEPROM_byte(E_PTATOFF_4);
-    ptatoff_float = *(float *)b;
-    b[0] = read_EEPROM_byte(E_PIXCMIN_1);
-    b[1] = read_EEPROM_byte(E_PIXCMIN_2);
-    b[2] = read_EEPROM_byte(E_PIXCMIN_3);
-    b[3] = read_EEPROM_byte(E_PIXCMIN_4);
-    pixcmin = *(float *)b;
-    b[0] = read_EEPROM_byte(E_PIXCMAX_1);
-    b[1] = read_EEPROM_byte(E_PIXCMAX_2);
-    b[2] = read_EEPROM_byte(E_PIXCMAX_3);
-    b[3] = read_EEPROM_byte(E_PIXCMAX_4);
-    pixcmax = *(float *)b;
-    epsilon = read_EEPROM_byte(E_EPSILON);
-    globaloff = read_EEPROM_byte(E_GLOBALOFF);
-    globalgain = read_EEPROM_byte(E_GLOBALGAIN_2) << 8 | read_EEPROM_byte(E_GLOBALGAIN_1);
-
-    // --- Thgrad_ij, ThOffset_ij and P_ij ---
-    m = 0;
-    n = 0;
-    pixc2 = pixc2_0; // set pointer to start address of the allocated heap // reset pointer to initial address
-    // top half
-    for (int i = 0; i < (unsigned short)(DevConst.NumberOfPixel / 2); i++)
-    {
-        thgrad[m][n] = read_EEPROM_byte(E_THGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_THGRAD + 2 * i);
-        thoffset[m][n] = read_EEPROM_byte(E_THOFFSET + 2 * i + 1) << 8 | read_EEPROM_byte(E_THOFFSET + 2 * i);
-        *(pixc2 + m * DevConst.PixelPerRow + n) = read_EEPROM_byte(E_PIJ + 2 * i + 1) << 8 | read_EEPROM_byte(E_PIJ + 2 * i);
-        n++;
-        if (n == DevConst.PixelPerRow)
-        {
-            n = 0;
-            m++; // !!!! forwards !!!!
-        }
-    }
-    // bottom half
-    m = (unsigned char)(DevConst.PixelPerColumn - 1);
-    n = 0;
-    for (int i = (unsigned short)(DevConst.NumberOfPixel / 2); i < (unsigned short)(DevConst.NumberOfPixel); i++)
-    {
-        thgrad[m][n] = read_EEPROM_byte(E_THGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_THGRAD + 2 * i);
-        thoffset[m][n] = read_EEPROM_byte(E_THOFFSET + 2 * i + 1) << 8 | read_EEPROM_byte(E_THOFFSET + 2 * i);
-        *(pixc2 + m * DevConst.PixelPerRow + n) = read_EEPROM_byte(E_PIJ + 2 * i + 1) << 8 | read_EEPROM_byte(E_PIJ + 2 * i);
-        n++;
-
-        if (n == DevConst.PixelPerRow)
-        {
-            n = 0;
-            m--; // !!!! backwards !!!!
-        }
-    }
-
-    //---VddCompGrad and VddCompOff---
-    // top half
-    m = 0;
-    n = 0;
-    // top half
-    for (int i = 0; i < (unsigned short)(DevConst.PixelPerBlock); i++)
-    {
-        vddcompgrad[m][n] = read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i);
-        vddcompoff[m][n] = read_EEPROM_byte(E_VDDCOMPOFF + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPOFF + 2 * i);
-        n++;
-        if (n == DevConst.PixelPerRow)
-        {
-            n = 0;
-            m++; // !!!! forwards !!!!
-        }
-    }
-    // bottom half
-    m = (unsigned char)(DevConst.RowPerBlock * 2 - 1);
-    n = 0;
-    for (int i = (unsigned short)(DevConst.PixelPerBlock); i < (unsigned short)(DevConst.PixelPerBlock * 2); i++)
-    {
-        vddcompgrad[m][n] = read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i);
-        vddcompoff[m][n] = read_EEPROM_byte(E_VDDCOMPOFF + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPOFF + 2 * i);
-        n++;
-        if (n == DevConst.PixelPerRow)
-        {
-            n = 0;
-            m--; // !!!! backwards !!!!
-        }
-    }
-}
-
-void write_sensor_byte(uint8_t device_address, uint8_t register_address, uint8_t input)
-{
-    uint8_t cmd[2] = {register_address, input};
-    i2c_write_blocking(I2C_PORT, device_address, cmd, 2, false);
-}
-
-void write_calibration_settings_to_sensor()
-{
-    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER1, mbit_calib);
-    sleep_ms(5);
-    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER2, bias_calib);
-    sleep_ms(5);
-    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER3, bias_calib);
-    sleep_ms(5);
-    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER4, clk_calib);
-    sleep_ms(5);
-    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER5, bpa_calib);
-    sleep_ms(5);
-    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER6, bpa_calib);
-    sleep_ms(5);
-    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER7, pu_calib);
-    sleep_ms(5);
-}
-
-void calcPixC()
-{
-    /* uses the formula from datasheet:
-
-                       PixC_uns[m][n]*(PixCmax-PixCmin)               epsilon   GlobalGain
-        PixC[m][n] = ( -------------------------------- + PixCmin ) * ------- * ----------
-                                    65535                               100        1000
-    */
-    double pixcij;
-    pixc2 = pixc2_0; // set pointer to start address of the allocated heap
-
-    for (int m = 0; m < DevConst.PixelPerColumn; m++)
-    {
-        for (int n = 0; n < DevConst.PixelPerRow; n++)
-        {
-            pixcij = (double)pixcmax;
-            pixcij -= (double)pixcmin;
-            pixcij /= (double)65535.0;
-            pixcij *= (double)*pixc2;
-            pixcij += (double)pixcmin;
-            pixcij /= (double)100.0;
-            pixcij *= (double)epsilon;
-            pixcij /= (double)10000.0;
-            pixcij *= (double)globalgain;
-            pixcij += 0.5;
-
-            *pixc2 = (unsigned long)pixcij;
-            pixc2++;
-        }
-    }
-}
-
-uint16_t calc_timert(uint8_t clk, uint8_t mbit)
-{
-    float a;
-    uint16_t calculated_timer_duration;
-
-    float Fclk_float = 12000000.0 / 63.0 * (float)clk + 1000000.0; // calc clk in Hz
-    a = 32.0 * ((float)pow(2, (unsigned char)(mbit & 0b00001111)) + 4.0) / Fclk_float;
-
-    calculated_timer_duration = (unsigned short)(0.98 * a * 1000000); // c in s | timer_duration in µs
-    return calculated_timer_duration;
-}
-
-bool timer_callback(repeating_timer_t *rt)
-{
-    static int count = 0;
-    // printf("timer fired! count: %d\n", ++count);
-    if (ReadingRoutineEnable)
-    {
-        NewDataAvailable = 1;
-    }
-    return true;
-}
-
-void read_sensor_register(uint8_t addr, uint8_t *dest, uint16_t n)
-{
-    i2c_write_blocking(I2C_PORT, SENSOR_ADDRESS, &addr, 1, true);
-    i2c_read_blocking(I2C_PORT, SENSOR_ADDRESS, dest, n, false);
-}
-
-void readblockinterrupt()
-{
-    unsigned char bottomblock;
-
-    ReadingRoutineEnable = 0;
-    cancel_repeating_timer(&timer);
-
-    // check EOC bit
-    read_sensor_register(STATUS_REGISTER, &statusreg, 1);
-    while (statusreg & 0x01 == 0)
-    {
-        printf("\tchecking EOC inside while loop\n");
-        read_sensor_register(STATUS_REGISTER, &statusreg, 1);
-    }
-
-    printf("\tReading from block number: %d", read_block_num);
-    switch_ptat_vdd ? printf(" (vdd)\n") : printf(" (ptat)\n");
-
-    read_sensor_register(TOP_HALF, (uint8_t *)&RAMoutput[read_block_num], BLOCK_LENGTH);
-    bottomblock = (uint8_t)((uint8_t)(NUMBER_OF_BLOCKS + 1) * 2 - read_block_num - 1);
-    read_sensor_register(BOTTOM_HALF, (uint8_t *)&RAMoutput[bottomblock], BLOCK_LENGTH);
-
-    read_block_num++;
-
-    if (read_block_num < NUMBER_OF_BLOCKS)
-    {
-        write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (uint8_t)(0x09 + (0x10 * read_block_num) + (0x04 * switch_ptat_vdd)));
-    }
-    else
-    {
-        if (read_eloffset_next_pic)
-        {
-            read_eloffset_next_pic = 0;
-
-            // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
-            // |  0  |  0  |  0  |  0  |   1   |    0     |   1   |    1   |
-            write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x0B + (0x04 * switch_ptat_vdd)));
-            new_offsets = 1;
-        }
-        else
-        {
-            if (picnum > 1)
-                state = 1;
-            picnum++;
-            printf("\tpicnum (after increment): %d\n", picnum);
-
-            if ((uint8_t)(picnum % READ_ELOFFSET_EVERYX) == 0)
-                read_eloffset_next_pic = 1;
-
-            if (DevConst.PTATVDDSwitch)
-                switch_ptat_vdd ^= 1;
-
-            read_block_num = 0;
-
-            // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
-            // |  0  |  0  |  0  |  0  |   1   |    0     |   0   |    1   |
-            write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x09 + (0x04 * switch_ptat_vdd)));
-        }
-    }
-
-    add_repeating_timer_us(-timert, timer_callback, nullptr, &timer);
-    ReadingRoutineEnable = 1;
-}
+void read_eeprom();
+void write_sensor_byte(uint8_t device_address, uint8_t register_address, uint8_t input);
+void write_calibration_settings_to_sensor();
+void calcPixC();
+uint16_t calc_timert(uint8_t clk, uint8_t mbit);
+void read_sensor_register(uint8_t addr, uint8_t *dest, uint16_t n);
+void calculate_pixel_temp();
 
 void sort_data()
 {
@@ -565,140 +279,6 @@ void sort_data()
     }
 }
 
-void calculate_pixel_temp()
-{
-
-    int64_t vij_pixc_and_pcscaleval;
-    int64_t pixcij;
-    int64_t vdd_calc_steps;
-    uint16_t table_row, table_col;
-    int32_t vx, vy, ydist, dta;
-    signed long pixel;
-    pixc2 = pixc2_0; // set pointer to start address of the allocated heap
-
-    /******************************************************************************************************************
-      step 0: find column of lookup table
-    ******************************************************************************************************************/
-    for (int i = 0; i < NROFTAELEMENTS; i++)
-    {
-        if (Ta > XTATemps[i])
-        {
-            table_col = i;
-        }
-    }
-    dta = Ta - XTATemps[table_col];
-    ydist = (int32_t)ADEQUIDISTANCE;
-
-    for (int m = 0; m < DevConst.PixelPerColumn; m++)
-    {
-        for (int n = 0; n < DevConst.PixelPerRow; n++)
-        {
-
-            /******************************************************************************************************************
-               step 1: use a variable with bigger data format for the compensation steps
-             ******************************************************************************************************************/
-            pixel = (signed long)data_pixel[m][n];
-
-            /******************************************************************************************************************
-               step 2: compensate thermal drifts (see datasheet, chapter: Thermal Offset)
-             ******************************************************************************************************************/
-            pixel -= (int32_t)(((int32_t)thgrad[m][n] * (int32_t)ptat_av_uint16) / (int32_t)gradscale_div);
-            pixel -= (int32_t)thoffset[m][n];
-
-            /******************************************************************************************************************
-               step 3: compensate electrical offset (see datasheet, chapter: Electrical Offset)
-             ******************************************************************************************************************/
-            if (m < DevConst.PixelPerColumn / 2)
-            { // top half
-                pixel -= eloffset[m % DevConst.RowPerBlock][n];
-            }
-            else
-            { // bottom half
-                pixel -= eloffset[m % DevConst.RowPerBlock + DevConst.RowPerBlock][n];
-            }
-
-            /******************************************************************************************************************
-               step 4: compensate vdd (see datasheet, chapter: Vdd Compensation)
-             ******************************************************************************************************************/
-            // first select VddCompGrad and VddCompOff for pixel m,n:
-            if (m < DevConst.PixelPerColumn / 2)
-            { // top half
-                vddcompgrad_n = vddcompgrad[m % DevConst.RowPerBlock][n];
-                vddcompoff_n = vddcompoff[m % DevConst.RowPerBlock][n];
-            }
-            else
-            { // bottom half
-                vddcompgrad_n = vddcompgrad[m % DevConst.RowPerBlock + DevConst.RowPerBlock][n];
-                vddcompoff_n = vddcompoff[m % DevConst.RowPerBlock + DevConst.RowPerBlock][n];
-            }
-            // now do the vdd calculation
-            vdd_calc_steps = vddcompgrad_n * ptat_av_uint16;
-            vdd_calc_steps = vdd_calc_steps / vddscgrad_div;
-            vdd_calc_steps = vdd_calc_steps + vddcompoff_n;
-            vdd_calc_steps = vdd_calc_steps * (vdd_av_uint16 - vddth1 - ((vddth2 - vddth1) / (ptatth2 - ptatth1)) * (ptat_av_uint16 - ptatth1));
-            vdd_calc_steps = vdd_calc_steps / vddscoff_div;
-            pixel -= vdd_calc_steps;
-
-            /******************************************************************************************************************
-               step 5: multiply sensitivity coeff for each pixel (see datasheet, chapter: Object Temperature)
-             ******************************************************************************************************************/
-            vij_pixc_and_pcscaleval = pixel * (int64_t)PCSCALEVAL;
-            pixel = (int32_t)(vij_pixc_and_pcscaleval / *pixc2);
-            pixc2++;
-            /******************************************************************************************************************
-               step 6: find correct temp for this sensor in lookup table and do a bilinear interpolation (see datasheet, chapter:  Look-up table)
-             ******************************************************************************************************************/
-            table_row = pixel + TABLEOFFSET;
-            table_row = table_row >> ADEXPBITS;
-            // bilinear interpolation
-            vx = ((((int32_t)TempTable[table_row][table_col + 1] - (int32_t)TempTable[table_row][table_col]) * (int32_t)dta) / (int32_t)TAEQUIDISTANCE) + (int32_t)TempTable[table_row][table_col];
-            vy = ((((int32_t)TempTable[table_row + 1][table_col + 1] - (int32_t)TempTable[table_row + 1][table_col]) * (int32_t)dta) / (int32_t)TAEQUIDISTANCE) + (int32_t)TempTable[table_row + 1][table_col];
-            pixel = (uint32_t)((vy - vx) * ((int32_t)(pixel + TABLEOFFSET) - (int32_t)YADValues[table_row]) / ydist + (int32_t)vx);
-
-            /******************************************************************************************************************
-               step 7: add GlobalOffset (stored as signed char)
-             ******************************************************************************************************************/
-            pixel += globaloff;
-
-            /******************************************************************************************************************
-              step 8: overwrite the uncompensate pixel with the new calculated compensated value
-            ******************************************************************************************************************/
-            data_pixel[m][n] = (unsigned short)pixel;
-        }
-    }
-
-    /******************************************************************************************************************
-      step 8: overwrite the uncompensate pixel with the new calculated compensated value
-    ******************************************************************************************************************/
-    // TODO:
-    // pixel_masking();
-}
-
-void print_final_array(void)
-{
-    printf("\n\n---pixel data---\n");
-    for (int m = 0; m < DevConst.PixelPerColumn; m++)
-    {
-        for (int n = 0; n < DevConst.PixelPerRow; n++)
-        {
-            printf("%04X", data_pixel[m][n]);
-        }
-        printf("\n");
-    }
-}
-
-void print_RAM_array(void)
-{
-    printf("\n\n---pixel data ---\n");
-    for (int m = 0; m < (2 * NUMBER_OF_BLOCKS + 2); m++)
-    {
-        for (int n = 0; n < BLOCK_LENGTH; n++)
-        {
-            printf("%02X", RAMoutput[m][n]);
-        }
-        printf("\n");
-    }
-}
 
 int main()
 {
@@ -809,7 +389,329 @@ int main()
             state = 0;
 
             calculate_pixel_temp();
-            print_final_array();
+
+            // printing calculated temperature
+            printf("\n\n---pixel data---\n");
+            for (int m = 0; m < DevConst.PixelPerColumn; m++)
+            {
+                for (int n = 0; n < DevConst.PixelPerRow; n++)
+                {
+                    printf("%04X", data_pixel[m][n]);
+                }
+                printf("\n");
+            }
+        }
+    }
+} // end of main
+
+void calculate_pixel_temp()
+{
+
+    int64_t vij_pixc_and_pcscaleval;
+    int64_t pixcij;
+    int64_t vdd_calc_steps;
+    uint16_t table_row, table_col;
+    int32_t vx, vy, ydist, dta;
+    signed long pixel;
+    pixc2 = pixc2_0; // set pointer to start address of the allocated heap
+
+    /******************************************************************************************************************
+      step 0: find column of lookup table
+    ******************************************************************************************************************/
+    for (int i = 0; i < NROFTAELEMENTS; i++)
+    {
+        if (Ta > XTATemps[i])
+        {
+            table_col = i;
+        }
+    }
+    dta = Ta - XTATemps[table_col];
+    ydist = (int32_t)ADEQUIDISTANCE;
+
+    for (int m = 0; m < DevConst.PixelPerColumn; m++)
+    {
+        for (int n = 0; n < DevConst.PixelPerRow; n++)
+        {
+
+            /******************************************************************************************************************
+               step 1: use a variable with bigger data format for the compensation steps
+             ******************************************************************************************************************/
+            pixel = (signed long)data_pixel[m][n];
+
+            /******************************************************************************************************************
+               step 2: compensate thermal drifts (see datasheet, chapter: Thermal Offset)
+             ******************************************************************************************************************/
+            pixel -= (int32_t)(((int32_t)thgrad[m][n] * (int32_t)ptat_av_uint16) / (int32_t)gradscale_div);
+            pixel -= (int32_t)thoffset[m][n];
+
+            /******************************************************************************************************************
+               step 3: compensate electrical offset (see datasheet, chapter: Electrical Offset)
+             ******************************************************************************************************************/
+            if (m < DevConst.PixelPerColumn / 2)
+            { // top half
+                pixel -= eloffset[m % DevConst.RowPerBlock][n];
+            }
+            else
+            { // bottom half
+                pixel -= eloffset[m % DevConst.RowPerBlock + DevConst.RowPerBlock][n];
+            }
+
+            /******************************************************************************************************************
+               step 4: compensate vdd (see datasheet, chapter: Vdd Compensation)
+             ******************************************************************************************************************/
+            // first select VddCompGrad and VddCompOff for pixel m,n:
+            if (m < DevConst.PixelPerColumn / 2)
+            { // top half
+                vddcompgrad_n = vddcompgrad[m % DevConst.RowPerBlock][n];
+                vddcompoff_n = vddcompoff[m % DevConst.RowPerBlock][n];
+            }
+            else
+            { // bottom half
+                vddcompgrad_n = vddcompgrad[m % DevConst.RowPerBlock + DevConst.RowPerBlock][n];
+                vddcompoff_n = vddcompoff[m % DevConst.RowPerBlock + DevConst.RowPerBlock][n];
+            }
+            // now do the vdd calculation
+            vdd_calc_steps = vddcompgrad_n * ptat_av_uint16;
+            vdd_calc_steps = vdd_calc_steps / vddscgrad_div;
+            vdd_calc_steps = vdd_calc_steps + vddcompoff_n;
+            vdd_calc_steps = vdd_calc_steps * (vdd_av_uint16 - vddth1 - ((vddth2 - vddth1) / (ptatth2 - ptatth1)) * (ptat_av_uint16 - ptatth1));
+            vdd_calc_steps = vdd_calc_steps / vddscoff_div;
+            pixel -= vdd_calc_steps;
+
+            /******************************************************************************************************************
+               step 5: multiply sensitivity coeff for each pixel (see datasheet, chapter: Object Temperature)
+             ******************************************************************************************************************/
+            vij_pixc_and_pcscaleval = pixel * (int64_t)PCSCALEVAL;
+            pixel = (int32_t)(vij_pixc_and_pcscaleval / *pixc2);
+            pixc2++;
+            /******************************************************************************************************************
+               step 6: find correct temp for this sensor in lookup table and do a bilinear interpolation (see datasheet, chapter:  Look-up table)
+             ******************************************************************************************************************/
+            table_row = pixel + TABLEOFFSET;
+            table_row = table_row >> ADEXPBITS;
+            // bilinear interpolation
+            vx = ((((int32_t)TempTable[table_row][table_col + 1] - (int32_t)TempTable[table_row][table_col]) * (int32_t)dta) / (int32_t)TAEQUIDISTANCE) + (int32_t)TempTable[table_row][table_col];
+            vy = ((((int32_t)TempTable[table_row + 1][table_col + 1] - (int32_t)TempTable[table_row + 1][table_col]) * (int32_t)dta) / (int32_t)TAEQUIDISTANCE) + (int32_t)TempTable[table_row + 1][table_col];
+            pixel = (uint32_t)((vy - vx) * ((int32_t)(pixel + TABLEOFFSET) - (int32_t)YADValues[table_row]) / ydist + (int32_t)vx);
+
+            /******************************************************************************************************************
+               step 7: add GlobalOffset (stored as signed char)
+             ******************************************************************************************************************/
+            pixel += globaloff;
+
+            /******************************************************************************************************************
+              step 8: overwrite the uncompensate pixel with the new calculated compensated value
+            ******************************************************************************************************************/
+            data_pixel[m][n] = (unsigned short)pixel;
+        }
+    }
+
+    /******************************************************************************************************************
+      step 8: overwrite the uncompensate pixel with the new calculated compensated value
+    ******************************************************************************************************************/
+    // TODO:
+    // pixel_masking();
+}
+
+void write_sensor_byte(uint8_t device_address, uint8_t register_address, uint8_t input)
+{
+    uint8_t cmd[2] = {register_address, input};
+    i2c_write_blocking(I2C_PORT, device_address, cmd, 2, false);
+}
+
+void write_calibration_settings_to_sensor()
+{
+    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER1, mbit_calib);
+    sleep_ms(5);
+    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER2, bias_calib);
+    sleep_ms(5);
+    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER3, bias_calib);
+    sleep_ms(5);
+    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER4, clk_calib);
+    sleep_ms(5);
+    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER5, bpa_calib);
+    sleep_ms(5);
+    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER6, bpa_calib);
+    sleep_ms(5);
+    write_sensor_byte(SENSOR_ADDRESS, TRIM_REGISTER7, pu_calib);
+    sleep_ms(5);
+}
+
+void calcPixC()
+{
+    /* uses the formula from datasheet:
+
+                       PixC_uns[m][n]*(PixCmax-PixCmin)               epsilon   GlobalGain
+        PixC[m][n] = ( -------------------------------- + PixCmin ) * ------- * ----------
+                                    65535                               100        1000
+    */
+    double pixcij;
+    pixc2 = pixc2_0; // set pointer to start address of the allocated heap
+
+    for (int m = 0; m < DevConst.PixelPerColumn; m++)
+    {
+        for (int n = 0; n < DevConst.PixelPerRow; n++)
+        {
+            pixcij = (double)pixcmax;
+            pixcij -= (double)pixcmin;
+            pixcij /= (double)65535.0;
+            pixcij *= (double)*pixc2;
+            pixcij += (double)pixcmin;
+            pixcij /= (double)100.0;
+            pixcij *= (double)epsilon;
+            pixcij /= (double)10000.0;
+            pixcij *= (double)globalgain;
+            pixcij += 0.5;
+
+            *pixc2 = (unsigned long)pixcij;
+            pixc2++;
+        }
+    }
+}
+
+uint16_t calc_timert(uint8_t clk, uint8_t mbit)
+{
+    float a;
+    uint16_t calculated_timer_duration;
+
+    float Fclk_float = 12000000.0 / 63.0 * (float)clk + 1000000.0; // calc clk in Hz
+    a = 32.0 * ((float)pow(2, (unsigned char)(mbit & 0b00001111)) + 4.0) / Fclk_float;
+
+    calculated_timer_duration = (unsigned short)(0.98 * a * 1000000); // c in s | timer_duration in µs
+    return calculated_timer_duration;
+}
+
+void read_sensor_register(uint8_t addr, uint8_t *dest, uint16_t n)
+{
+    i2c_write_blocking(I2C_PORT, SENSOR_ADDRESS, &addr, 1, true);
+    i2c_read_blocking(I2C_PORT, SENSOR_ADDRESS, dest, n, false);
+}
+
+uint8_t read_EEPROM_byte(uint16_t address)
+{
+    uint8_t rdata = 0;
+    uint8_t memory_address[2] = {
+        static_cast<uint8_t>(address >> 8),
+        static_cast<uint8_t>(address & 0xFF),
+    };
+
+    i2c_write_blocking(I2C_PORT, EEPROM_ADDRESS, memory_address, 2, true);
+    i2c_read_blocking(I2C_PORT, EEPROM_ADDRESS, &rdata, 1, false);
+
+    return rdata;
+}
+
+void read_eeprom()
+{
+    int m = 0;
+    int n = 0;
+    uint8_t b[4];
+    mbit_calib = read_EEPROM_byte(E_MBIT_CALIB);
+    bias_calib = read_EEPROM_byte(E_BIAS_CALIB);
+    clk_calib = read_EEPROM_byte(E_CLK_CALIB);
+    bpa_calib = read_EEPROM_byte(E_BPA_CALIB);
+    pu_calib = read_EEPROM_byte(E_PU_CALIB);
+    mbit_user = read_EEPROM_byte(E_MBIT_USER);
+    bias_user = read_EEPROM_byte(E_BIAS_USER);
+    clk_user = read_EEPROM_byte(E_CLK_USER);
+    bpa_user = read_EEPROM_byte(E_BPA_USER);
+    pu_user = read_EEPROM_byte(E_PU_USER);
+    vddth1 = read_EEPROM_byte(E_VDDTH1_2) << 8 | read_EEPROM_byte(E_VDDTH1_1);
+    vddth2 = read_EEPROM_byte(E_VDDTH2_2) << 8 | read_EEPROM_byte(E_VDDTH2_1);
+    vddscgrad = read_EEPROM_byte(E_VDDSCGRAD);
+    vddscoff = read_EEPROM_byte(E_VDDSCOFF);
+    ptatth1 = read_EEPROM_byte(E_PTATTH1_2) << 8 | read_EEPROM_byte(E_PTATTH1_1);
+    ptatth2 = read_EEPROM_byte(E_PTATTH2_2) << 8 | read_EEPROM_byte(E_PTATTH2_1);
+
+    gradscale = read_EEPROM_byte(E_GRADSCALE);
+    tablenumber = read_EEPROM_byte(E_TABLENUMBER2) << 8 | read_EEPROM_byte(E_TABLENUMBER1);
+
+    b[0] = read_EEPROM_byte(E_PTATGR_1);
+    b[1] = read_EEPROM_byte(E_PTATGR_2);
+    b[2] = read_EEPROM_byte(E_PTATGR_3);
+    b[3] = read_EEPROM_byte(E_PTATGR_4);
+    ptatgr_float = *(float *)b;
+    b[0] = read_EEPROM_byte(E_PTATOFF_1);
+    b[1] = read_EEPROM_byte(E_PTATOFF_2);
+    b[2] = read_EEPROM_byte(E_PTATOFF_3);
+    b[3] = read_EEPROM_byte(E_PTATOFF_4);
+    ptatoff_float = *(float *)b;
+    b[0] = read_EEPROM_byte(E_PIXCMIN_1);
+    b[1] = read_EEPROM_byte(E_PIXCMIN_2);
+    b[2] = read_EEPROM_byte(E_PIXCMIN_3);
+    b[3] = read_EEPROM_byte(E_PIXCMIN_4);
+    pixcmin = *(float *)b;
+    b[0] = read_EEPROM_byte(E_PIXCMAX_1);
+    b[1] = read_EEPROM_byte(E_PIXCMAX_2);
+    b[2] = read_EEPROM_byte(E_PIXCMAX_3);
+    b[3] = read_EEPROM_byte(E_PIXCMAX_4);
+    pixcmax = *(float *)b;
+    epsilon = read_EEPROM_byte(E_EPSILON);
+    globaloff = read_EEPROM_byte(E_GLOBALOFF);
+    globalgain = read_EEPROM_byte(E_GLOBALGAIN_2) << 8 | read_EEPROM_byte(E_GLOBALGAIN_1);
+
+    // --- Thgrad_ij, ThOffset_ij and P_ij ---
+    m = 0;
+    n = 0;
+    pixc2 = pixc2_0; // set pointer to start address of the allocated heap // reset pointer to initial address
+    // top half
+    for (int i = 0; i < (unsigned short)(DevConst.NumberOfPixel / 2); i++)
+    {
+        thgrad[m][n] = read_EEPROM_byte(E_THGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_THGRAD + 2 * i);
+        thoffset[m][n] = read_EEPROM_byte(E_THOFFSET + 2 * i + 1) << 8 | read_EEPROM_byte(E_THOFFSET + 2 * i);
+        *(pixc2 + m * DevConst.PixelPerRow + n) = read_EEPROM_byte(E_PIJ + 2 * i + 1) << 8 | read_EEPROM_byte(E_PIJ + 2 * i);
+        n++;
+        if (n == DevConst.PixelPerRow)
+        {
+            n = 0;
+            m++; // !!!! forwards !!!!
+        }
+    }
+    // bottom half
+    m = (unsigned char)(DevConst.PixelPerColumn - 1);
+    n = 0;
+    for (int i = (unsigned short)(DevConst.NumberOfPixel / 2); i < (unsigned short)(DevConst.NumberOfPixel); i++)
+    {
+        thgrad[m][n] = read_EEPROM_byte(E_THGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_THGRAD + 2 * i);
+        thoffset[m][n] = read_EEPROM_byte(E_THOFFSET + 2 * i + 1) << 8 | read_EEPROM_byte(E_THOFFSET + 2 * i);
+        *(pixc2 + m * DevConst.PixelPerRow + n) = read_EEPROM_byte(E_PIJ + 2 * i + 1) << 8 | read_EEPROM_byte(E_PIJ + 2 * i);
+        n++;
+
+        if (n == DevConst.PixelPerRow)
+        {
+            n = 0;
+            m--; // !!!! backwards !!!!
+        }
+    }
+
+    //---VddCompGrad and VddCompOff---
+    // top half
+    m = 0;
+    n = 0;
+    // top half
+    for (int i = 0; i < (unsigned short)(DevConst.PixelPerBlock); i++)
+    {
+        vddcompgrad[m][n] = read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i);
+        vddcompoff[m][n] = read_EEPROM_byte(E_VDDCOMPOFF + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPOFF + 2 * i);
+        n++;
+        if (n == DevConst.PixelPerRow)
+        {
+            n = 0;
+            m++; // !!!! forwards !!!!
+        }
+    }
+    // bottom half
+    m = (unsigned char)(DevConst.RowPerBlock * 2 - 1);
+    n = 0;
+    for (int i = (unsigned short)(DevConst.PixelPerBlock); i < (unsigned short)(DevConst.PixelPerBlock * 2); i++)
+    {
+        vddcompgrad[m][n] = read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPGRAD + 2 * i);
+        vddcompoff[m][n] = read_EEPROM_byte(E_VDDCOMPOFF + 2 * i + 1) << 8 | read_EEPROM_byte(E_VDDCOMPOFF + 2 * i);
+        n++;
+        if (n == DevConst.PixelPerRow)
+        {
+            n = 0;
+            m--; // !!!! backwards !!!!
         }
     }
 }

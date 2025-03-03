@@ -737,85 +737,70 @@ int main()
     vddscoff_div = pow(2, vddscoff);
     calcPixC();
 
-    // timer initialization
+    // timer calculation
     timert = calc_timert(clk_calib, mbit_calib); // chyba około 25 ms
-    printf("timert: %d\n", timert);
-    add_repeating_timer_us(-timert, timer_callback, nullptr, &timer);
 
     // Loopin time!!
-    int interation_count = 1;
-    int read_count = 1;
     while (true)
     {
-        // printf("Iteration number: %d\n", interation_count);
-        if (NewDataAvailable)
+        sleep_ms((uint32_t)(timert / 1000) + 1);
+
+        // readblockinterrupt();
         {
-            printf("Read count: %d\n", read_count);
+            ReadingRoutineEnable = 0;
 
-            // readblockinterrupt();
-            {
-                ReadingRoutineEnable = 0;
-                cancel_repeating_timer(&timer);
-
-                // check EOC bit
+            // check EOC bit
+            read_sensor_register(STATUS_REGISTER, &statusreg, 1);
+            while (statusreg & 0x01 == 0)
                 read_sensor_register(STATUS_REGISTER, &statusreg, 1);
-                while (statusreg & 0x01 == 0)
-                    read_sensor_register(STATUS_REGISTER, &statusreg, 1);
 
-                read_sensor_register(TOP_HALF, (uint8_t *)&RAMoutput[read_block_num], BLOCK_LENGTH);
-                read_sensor_register(BOTTOM_HALF, (uint8_t *)&RAMoutput[(NUMBER_OF_BLOCKS + 1) * 2 - read_block_num - 1], BLOCK_LENGTH);
+            read_sensor_register(TOP_HALF, (uint8_t *)&RAMoutput[read_block_num], BLOCK_LENGTH);
+            read_sensor_register(BOTTOM_HALF, (uint8_t *)&RAMoutput[(NUMBER_OF_BLOCKS + 1) * 2 - read_block_num - 1], BLOCK_LENGTH);
 
-                read_block_num++;
+            read_block_num++;
 
-                if (read_block_num < NUMBER_OF_BLOCKS)
+            if (read_block_num < NUMBER_OF_BLOCKS)
+            {
+                // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
+                // |  0  |  0  |  x  |  x  |   1   |    x     |   0   |    1   |
+                write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (uint8_t)(0x09 + (0x10 * read_block_num) + (0x04 * switch_ptat_vdd)));
+            }
+            else
+            {
+                if (read_eloffset_next_pic)
                 {
+                    read_eloffset_next_pic = 0;
+
                     // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
-                    // |  0  |  0  |  x  |  x  |   1   |    x     |   0   |    1   |
-                    write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (uint8_t)(0x09 + (0x10 * read_block_num) + (0x04 * switch_ptat_vdd)));
+                    // |  0  |  0  |  0  |  0  |   1   |    x     |   1   |    1   |
+                    write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x0B + (0x04 * switch_ptat_vdd)));
+                    new_offsets = 1;
                 }
                 else
                 {
-                    if (read_eloffset_next_pic)
-                    {
-                        read_eloffset_next_pic = 0;
+                    if (picnum > 1)
+                        state = 1;
+                    picnum++;
+                    printf("\tpicnum (after increment): %d\n", picnum);
 
-                        // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
-                        // |  0  |  0  |  0  |  0  |   1   |    x     |   1   |    1   |
-                        write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x0B + (0x04 * switch_ptat_vdd)));
-                        new_offsets = 1;
-                    }
-                    else
-                    {
-                        if (picnum > 1)
-                            state = 1;
-                        picnum++;
-                        printf("\tpicnum (after increment): %d\n", picnum);
+                    if ((uint8_t)(picnum % READ_ELOFFSET_EVERYX) == 0)
+                        read_eloffset_next_pic = 1;
 
-                        if ((uint8_t)(picnum % READ_ELOFFSET_EVERYX) == 0)
-                            read_eloffset_next_pic = 1;
+                    if (DevConst.PTATVDDSwitch)
+                        switch_ptat_vdd ^= 1;
 
-                        if (DevConst.PTATVDDSwitch)
-                            switch_ptat_vdd ^= 1;
+                    read_block_num = 0;
 
-                        read_block_num = 0;
-
-                        // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
-                        // |  0  |  0  |  0  |  0  |   1   |    x     |   0   |    1   |
-                        write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x09 + (0x04 * switch_ptat_vdd)));
-                    }
+                    // |    RFU    |   Block   | Start | VDD_MEAS | BLIND | WAKEUP |
+                    // |  0  |  0  |  0  |  0  |   1   |    x     |   0   |    1   |
+                    write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x09 + (0x04 * switch_ptat_vdd)));
                 }
+            }
 
-                add_repeating_timer_us(-timert, timer_callback, nullptr, &timer);
-                ReadingRoutineEnable = 1;
-            } // end of readblockinterrupt();
+            ReadingRoutineEnable = 1;
+        } // end of readblockinterrupt();
 
-            NewDataAvailable = 0;
-            read_count++;
-        }
-        else
-        {
-            sleep_ms(1);
-        }
+        NewDataAvailable = 0;
 
         if (state)
         {
@@ -826,7 +811,5 @@ int main()
             calculate_pixel_temp();
             print_final_array();
         }
-        
-        interation_count++;
     }
 }

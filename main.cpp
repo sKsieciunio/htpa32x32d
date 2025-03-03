@@ -124,10 +124,6 @@ int vddcompgrad_n;
 int vddcompoff_n;
 uint32_t t1;
 
-unsigned NewDataAvailable = 1;
-
-unsigned short timert;
-
 void read_eeprom();
 void write_sensor_byte(uint8_t device_address, uint8_t register_address, uint8_t input);
 void write_calibration_settings_to_sensor();
@@ -318,7 +314,7 @@ int main()
     calcPixC();
 
     // timer calculation
-    timert = calc_timert(clk_calib, mbit_calib); // chyba około 25 ms
+    uint16_t timert = calc_timert(clk_calib, mbit_calib); // chyba około 25 ms
 
     // Loopin time!!
     while (true)
@@ -327,8 +323,6 @@ int main()
 
         // readblockinterrupt();
         {
-            ReadingRoutineEnable = 0;
-
             // check EOC bit
             read_sensor_register(STATUS_REGISTER, &statusreg, 1);
             while (statusreg & 0x01 == 0)
@@ -376,11 +370,7 @@ int main()
                     write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x09 + (0x04 * switch_ptat_vdd)));
                 }
             }
-
-            ReadingRoutineEnable = 1;
         } // end of readblockinterrupt();
-
-        NewDataAvailable = 0;
 
         if (state)
         {

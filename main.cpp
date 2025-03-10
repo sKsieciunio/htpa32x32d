@@ -123,6 +123,7 @@ uint32_t gradscale_div, vddscgrad_div, vddscoff_div;
 int vddcompgrad_n;
 int vddcompoff_n;
 uint32_t t1;
+uint16_t timert;
 
 void read_eeprom();
 void write_sensor_byte(uint8_t device_address, uint8_t register_address, uint8_t input);
@@ -131,7 +132,7 @@ void calcPixC();
 uint16_t calc_timert(uint8_t clk, uint8_t mbit);
 void read_sensor_register(uint8_t addr, uint8_t *dest, uint16_t n);
 void calculate_pixel_temp();
-void print_shit();
+void read_blocks_and_offsets();
 
 void sort_data()
 {
@@ -316,45 +317,25 @@ int main()
     calcPixC();
 
     // timer calculation
-    uint16_t timert = calc_timert(clk_calib, mbit_calib); // chyba około 25 ms
+    timert = calc_timert(clk_calib, mbit_calib); // chyba około 25 ms
 
     // Loopin time!!
     while (true)
     {
-        // sleep_ms((uint32_t)(timert / 1000) + 1);
+        getchar();
 
-        print_shit();
-
-        for (int i = 0; i < NUMBER_OF_BLOCKS + 1; i++)
+        for (int i = 0; i < 2; i++)
         {
-            read_block_num = i;
+            read_blocks_and_offsets();
 
-            if (read_block_num < NUMBER_OF_BLOCKS)
-                write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (uint8_t)(0x09 + (0x10 * read_block_num) + (0x04 * switch_ptat_vdd)));
-            else 
-                write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x0B + (0x04 * switch_ptat_vdd)));
-
-            sleep_ms((uint32_t)(timert / 1000) + 1);
-
-            read_sensor_register(STATUS_REGISTER, &statusreg, 1);
-            while (statusreg & 0x01 == 0)
-                read_sensor_register(STATUS_REGISTER, &statusreg, 1);
-
-            read_sensor_register(TOP_HALF, (uint8_t *)&RAMoutput[read_block_num], BLOCK_LENGTH);
-            read_sensor_register(BOTTOM_HALF, (uint8_t *)&RAMoutput[(NUMBER_OF_BLOCKS + 1) * 2 - read_block_num - 1], BLOCK_LENGTH);
+            switch_ptat_vdd ^= 1;
+            sort_data();
         }
-
-        new_offsets = 1;
-        picnum++;
-        switch_ptat_vdd ^= 1;
-
-        printf("Sorting data\n");
-        sort_data();
 
         calculate_pixel_temp();
 
         // printing calculated temperature
-        printf("\n\n---pixel data---\n");
+        printf("---pixel data---\n");
         for (int m = 0; m < DevConst.PixelPerColumn; m++)
         {
             for (int n = 0; n < DevConst.PixelPerRow; n++)
@@ -366,9 +347,26 @@ int main()
     }
 } // end of main
 
-void print_shit()
+void read_blocks_and_offsets()
 {
-    printf("read_block_num: %d, switch_ptat_vdd: %d, read_eloffset_next_pic: %d, picnum: %d\n", read_block_num, switch_ptat_vdd, read_eloffset_next_pic, picnum);
+    for (int i = 0; i < NUMBER_OF_BLOCKS + 1; i++)
+    {
+        read_block_num = i;
+
+        if (read_block_num < NUMBER_OF_BLOCKS)
+            write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (uint8_t)(0x09 + (0x10 * read_block_num) + (0x04 * switch_ptat_vdd)));
+        else 
+            write_sensor_byte(SENSOR_ADDRESS, CONFIGURATION_REGISTER, (unsigned char)(0x0B + (0x04 * switch_ptat_vdd)));
+
+        sleep_ms((uint32_t)(timert / 1000) + 1);
+
+        read_sensor_register(STATUS_REGISTER, &statusreg, 1);
+        while (statusreg & 0x01 == 0)
+            read_sensor_register(STATUS_REGISTER, &statusreg, 1);
+
+        read_sensor_register(TOP_HALF, (uint8_t *)&RAMoutput[read_block_num], BLOCK_LENGTH);
+        read_sensor_register(BOTTOM_HALF, (uint8_t *)&RAMoutput[(NUMBER_OF_BLOCKS + 1) * 2 - read_block_num - 1], BLOCK_LENGTH);
+    }
 }
 
 void calculate_pixel_temp()

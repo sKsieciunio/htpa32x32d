@@ -282,7 +282,7 @@ void sort_data()
 int main()
 {
     stdio_init_all();
-    getchar(); // blocking program so i can open serial monitor and get output
+    // getchar(); // blocking program so i can open serial monitor and get output
 
     i2c_init(I2C_PORT, CLOCK_SENSOR);
 
@@ -322,7 +322,8 @@ int main()
     // Loopin time!!
     while (true)
     {
-        getchar();
+        if (getchar() == 'q') 
+            break;
 
         for (int i = 0; i < 2; i++)
         {
@@ -335,7 +336,6 @@ int main()
         calculate_pixel_temp();
 
         // printing calculated temperature
-        printf("---pixel data---\n");
         for (int m = 0; m < DevConst.PixelPerColumn; m++)
         {
             for (int n = 0; n < DevConst.PixelPerRow; n++)
@@ -344,6 +344,7 @@ int main()
             }
             printf("\n");
         }
+        printf("\0");
     }
 } // end of main
 
